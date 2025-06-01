@@ -112,50 +112,51 @@ class StreamSpecCreator(QMainWindow):
         
     def build_tree(self):
         """Build the tree structure from the flat file list"""
-        # Create a nested dictionary structure
-        tree_dict = defaultdict(dict)
+        # Pre-sort the files to ensure parents come before children
+        sorted_files = sorted(self.stream_files)
         
-        for file_path in self.stream_files:
+        # Create root item once
+        root = self.tree.invisibleRootItem()
+        
+        # Keep track of created folders to avoid lookups
+        folder_items = {}
+        
+        # Batch processing - disable updates
+        self.tree.setUpdatesEnabled(False)
+        
+        for file_path in sorted_files:
             parts = file_path.split('/')
-            current = tree_dict
+            parent = root
             
-            for i, part in enumerate(parts):
-                if i == len(parts) - 1:  # It's a file
-                    current[part] = None
-                else:  # It's a folder
-                    if part not in current:
-                        current[part] = {}
-                    current = current[part]
-        
-        # Build the QTreeWidget from the dictionary
-        self.populate_tree(tree_dict, self.tree.invisibleRootItem())
-        
-    def populate_tree(self, tree_dict, parent_item, path=""):
-        """Recursively populate the QTreeWidget"""
-        for name, children in sorted(tree_dict.items()):
-            # Create the tree item
-            item = QTreeWidgetItem(parent_item)
-            item.setText(0, name)
-
-            if name in ['p4ignore.txt', '.p4ignore']:
-                item.setCheckState(0, Qt.Checked)
-            else:
-                item.setCheckState(0, Qt.Unchecked)
+            # Build path as we go to track folders
+            current_path = ""
             
-            # Store the full path in the item
-            full_path = f"{path}/{name}" if path else name
-            item.setData(0, Qt.UserRole, full_path)
-            
-            # If it has children, it's a folder
-            if children:
-                # Set folder flags
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsAutoTristate | Qt.ItemFlag.ItemIsUserCheckable)
-                self.populate_tree(children, item, full_path)
-                item.setExpanded(False)
-            else:
-                # Set file flags (no tristate)
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            # Process all segments except the last one (folders)
+            for i, part in enumerate(parts[:-1]):
+                current_path = f"{current_path}/{part}" if current_path else part
                 
+                if current_path not in folder_items:
+                    item = QTreeWidgetItem(parent)
+                    item.setText(0, part)
+                    item.setCheckState(0, Qt.Unchecked)
+                    item.setData(0, Qt.UserRole, current_path)
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsAutoTristate | Qt.ItemFlag.ItemIsUserCheckable)
+                    folder_items[current_path] = item
+                    parent = item
+                else:
+                    parent = folder_items[current_path]
+            
+            # Handle the file (last part)
+            file_item = QTreeWidgetItem(parent)
+            file_item.setText(0, parts[-1])
+            file_item.setCheckState(0, Qt.Unchecked if parts[-1] not in ['p4ignore.txt', '.p4ignore'] else Qt.Checked)
+            file_item.setData(0, Qt.UserRole, file_path)
+            file_item.setFlags(file_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+        # Re-enable updates
+        self.tree.setUpdatesEnabled(True)
+
+
     def on_item_changed(self, item, column):
         """Handle item check state changes"""
         # Block signals to prevent recursive calls
