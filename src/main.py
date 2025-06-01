@@ -1,18 +1,55 @@
 import sys
 from collections import defaultdict
+from functools import wraps
+
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QTreeWidget, QTreeWidgetItem, 
-                             QTextEdit, QLabel, QSplitter)
-from PySide6.QtCore import Qt
+                             QTextEdit, QLabel, QMessageBox, QPushButton, QSplitter, QDialog,
+                             QProgressBar)
+from PySide6.QtCore import Qt, QTimer
 from P4 import P4, P4Exception
+
+def show_error_dialog(func):
+    @wraps(func)
+    def warpper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            QMessageBox.critical(None, "Error", str(e))
+            raise
+    return warpper
 
 p4 = P4()
 p4.connect()
 
 
+class LoadingDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Loading...")
+        self.setModal(True)
+        self.setFixedSize(300, 100)
+        
+        layout = QVBoxLayout()
+        
+        self.label = QLabel("Loading stream files...")
+        self.label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.label)
+        
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)  # Indeterminate progress
+        layout.addWidget(self.progress)
+        
+        self.setLayout(layout)
+        
+        # Remove window decorations for cleaner look
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+
+
 class StreamSpecCreator(QMainWindow):
-    def __init__(self, stream_files, parent_stream):
+    def __init__(self, stream_obj, stream_files, parent_stream):
         super().__init__()
+        self.stream_obj = stream_obj
         self.stream_files = stream_files
         self.parent_stream = parent_stream
         self.init_ui()
@@ -59,6 +96,13 @@ class StreamSpecCreator(QMainWindow):
         splitter.setSizes([600, 400])
         
         layout.addWidget(splitter)
+
+        button_layout = QHBoxLayout()
+        update_button = QPushButton("Update Stream")
+        update_button.clicked.connect(self.on_update_stream)
+        button_layout.addStretch()
+        button_layout.addWidget(update_button)
+        layout.addLayout(button_layout)
         
         # Build the tree from the file list
         self.build_tree()
@@ -92,25 +136,34 @@ class StreamSpecCreator(QMainWindow):
             # Create the tree item
             item = QTreeWidgetItem(parent_item)
             item.setText(0, name)
-            item.setCheckState(0, Qt.Unchecked)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsAutoTristate | Qt.ItemFlag.ItemIsUserCheckable)
+
+            if name in ['p4ignore.txt', '.p4ignore']:
+                item.setCheckState(0, Qt.Checked)
+            else:
+                item.setCheckState(0, Qt.Unchecked)
             
             # Store the full path in the item
             full_path = f"{path}/{name}" if path else name
             item.setData(0, Qt.UserRole, full_path)
             
             # If it has children, it's a folder
-            if children is not None:
+            if children:
+                # Set folder flags
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsAutoTristate | Qt.ItemFlag.ItemIsUserCheckable)
                 self.populate_tree(children, item, full_path)
-                item.setExpanded(True)
+                item.setExpanded(False)
+            else:
+                # Set file flags (no tristate)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 
     def on_item_changed(self, item, column):
         """Handle item check state changes"""
         # Block signals to prevent recursive calls
         self.tree.blockSignals(True)
         
-        # Update children if this is a folder
-        self.update_children_check_state(item, item.checkState(0))
+        # Only update children if this is a folder (has children)
+        if item.childCount() > 0 and item.checkState(0) != Qt.PartiallyChecked:
+            self.update_children_check_state(item, item.checkState(0))
         
         # Update parent check states
         self.update_parent_check_state(item.parent())
@@ -126,7 +179,9 @@ class StreamSpecCreator(QMainWindow):
         for i in range(item.childCount()):
             child = item.child(i)
             child.setCheckState(0, check_state)
-            self.update_children_check_state(child, check_state)
+            # Recursively update grandchildren
+            if child.childCount() > 0:
+                self.update_children_check_state(child, check_state)
             
     def update_parent_check_state(self, parent):
         """Update parent check state based on children"""
@@ -206,30 +261,61 @@ class StreamSpecCreator(QMainWindow):
         paths = self.get_checked_paths()
         
         if paths:
-            spec_lines = [f"share {path}" for path in paths]
-            self.stream_spec = "\n".join(spec_lines)
+            self.spec_lines = [f"share {path}" for path in paths]
+            self.stream_spec = "\n".join(self.spec_lines)
         else:
             self.stream_spec = "# No paths selected"
             
         self.spec_text.setPlainText(self.stream_spec)
-        
 
+    @show_error_dialog
+    def on_update_stream(self):
+        """Update the stream based on selected items"""
+        new_spec = self.stream_obj
+        new_spec["Paths"] = self.spec_lines
+        p4.save_stream(new_spec)
+        self.close()
+
+        
+@show_error_dialog
 def main(stream):
-    print(f"The stream is {stream}")
-    stream_obj = p4.run_stream("-o", f"{stream}")[0]
-    parent = stream_obj["Parent"]
-    paths = p4.run_files("--streamviews", f"{parent}/...")
-    stream_files = [path['streamFile'].replace(f"{parent}/", '') for path in paths]
-    
     # Create Qt application
     app = QApplication(sys.argv)
     
+    # Show loading dialog
+    loading = LoadingDialog()
+    loading.show()
+    QApplication.processEvents()
+    
+
+    print(f"The stream is {stream}")
+    stream_obj = p4.run_stream("-o", f"{stream}")[0]
+    if stream_obj["Type"] != "virtual":
+        raise Exception(f"Stream {stream} is not a virtual stream")
+    parent = stream_obj["Parent"]
+    
+
+    loading.label.setText(f"Loading files from {parent}...")
+    QApplication.processEvents()
+    
+    paths = p4.run_files("--streamviews", f"{parent}/...")
+    stream_files = [path['streamFile'].replace(f"{parent}/", '') for path in paths]
+    
+    loading.label.setText("Building interface...")
+    QApplication.processEvents()
+    
     # Create and show the main window
-    window = StreamSpecCreator(stream_files, parent)
-    window.show()
+    window = StreamSpecCreator(stream_obj, stream_files, parent)
+
+    def show_main_window():
+        # Close loading dialog and show main window
+        loading.close()
+        window.show()
+
+    QTimer.singleShot(100, show_main_window)
     
     # Run the application
-    sys.exit(app.exec())
+    return app.exec()
 
 
 if __name__ == '__main__':
