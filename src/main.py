@@ -54,6 +54,8 @@ class FileTreeBuilder(QObject):
     finished = Signal(dict)
     error = Signal(str)
     
+    FILES_KEY = '__files__'  # Use double underscore to minimize conflicts
+    
     def __init__(self, stream_files):
         super().__init__()
         self.stream_files = stream_files
@@ -75,9 +77,9 @@ class FileTreeBuilder(QObject):
                 
                 # Handle root-level files
                 if len(parts) == 1:
-                    if '_files' not in tree:
-                        tree['_files'] = []
-                    tree['_files'].append(parts[0])
+                    if self.FILES_KEY not in tree:
+                        tree[self.FILES_KEY] = []
+                    tree[self.FILES_KEY].append(parts[0])
                     continue
                 
                 current = tree
@@ -86,9 +88,9 @@ class FileTreeBuilder(QObject):
                 for i, part in enumerate(parts):
                     if i == len(parts) - 1:
                         # This is a file
-                        if '_files' not in current:
-                            current['_files'] = []
-                        current['_files'].append(part)
+                        if self.FILES_KEY not in current:
+                            current[self.FILES_KEY] = []
+                        current[self.FILES_KEY].append(part)
                     else:
                         # This is a folder
                         if part not in current:
@@ -213,9 +215,11 @@ class StreamSpecCreator(QMainWindow):
         
     def build_tree_level(self, parent_item, level_dict, parent_path):
         """Build one level of the tree with lazy loading"""
+        FILES_KEY = FileTreeBuilder.FILES_KEY
+        
         # First add folders
         for folder_name, folder_contents in sorted(level_dict.items()):
-            if folder_name.startswith('_'):
+            if folder_name == FILES_KEY:
                 continue
                 
             current_path = f"{parent_path}/{folder_name}" if parent_path else folder_name
@@ -228,8 +232,8 @@ class StreamSpecCreator(QMainWindow):
             folder_item.setFlags(folder_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             
             # Check if folder has any contents
-            has_subfolders = any(k for k in folder_contents.keys() if not k.startswith('_'))
-            has_files = '_files' in folder_contents and len(folder_contents['_files']) > 0
+            has_subfolders = any(k for k in folder_contents.keys() if k != FILES_KEY)
+            has_files = FILES_KEY in folder_contents and len(folder_contents[FILES_KEY]) > 0
             
             if has_subfolders or has_files:
                 # Add placeholder to show expand arrow
@@ -239,8 +243,8 @@ class StreamSpecCreator(QMainWindow):
                 placeholder.setData(0, Qt.UserRole, None)
         
         # Then add files
-        if '_files' in level_dict and level_dict['_files']:
-            for file_name in sorted(level_dict['_files']):
+        if FILES_KEY in level_dict and level_dict[FILES_KEY]:
+            for file_name in sorted(level_dict[FILES_KEY]):
                 file_path = f"{parent_path}/{file_name}" if parent_path else file_name
                 
                 file_item = QTreeWidgetItem(parent_item)
