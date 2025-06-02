@@ -8,3 +8,9 @@ dependencies = [
     "p4python>=2025.1.2767466",
     "pyside6>=6.9.0",
 ]
+
+
+[dependency-groups]
+dev = [
+    "nuitka>=2.7.5",
+]

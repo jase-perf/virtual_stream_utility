@@ -1,0 +1,1 @@
+uv run python -m nuitka --enable-plugin=pyside6 --standalone --onefile --output-filename=bin/virt-stream-util.exe --deployment  src/main.py

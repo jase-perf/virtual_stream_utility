@@ -1,0 +1,2 @@
+p4python
+pyside6>=6.9.0
