@@ -48,9 +48,13 @@ Download a precompiled executable from the [Releases page](https://github.com/ja
 This is a humble open-source project so the exe is not signed and you may need to tell Windows Defender or other antivirus software to trust it. Feel free to compile from source yourself or run it as python (see below) if you are concerned.
 
 1. In P4V, go to Tools > Manage Tools > Custom Tools...
+
     ![Setup custom tools in P4V](images/custom_tools.png)
+
 2. Create a new tool
+
     ![New tool dialog](images/new_tool.png)
+
 3. Enter settings: 
     - Name: Virtual Stream Utility
     - Add to applicable context menus
@@ -60,6 +64,7 @@ This is a humble open-source project so the exe is not signed and you may need t
     - Refresh P4V upon completion
     
     ![Tool settings](images/tool_settings.png)
+
 4. Click OK
 
 Now you can run the tool by right clicking on a virtual stream and selecting "Virtual Stream Utility" from the bottom of the menu.
@@ -67,6 +72,7 @@ Now you can run the tool by right clicking on a virtual stream and selecting "Vi
 ### Antivirus Warning
 
 If you see an alert like this:
+
 ![Error: Unable to run program](images/error.png)
 
 It means windows defender has blocked the executable because it is not signed. 
