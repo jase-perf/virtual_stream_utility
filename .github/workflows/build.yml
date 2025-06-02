@@ -1,0 +1,50 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger on version tags
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install uv
+      run: |
+        pip install uv
+        
+    - name: Setup Virtual Environment and Install Dependencies
+      run: |
+        uv venv
+        uv pip install .[dev]
+        
+    - name: Build with Nuitka
+      run: |
+        uv run python -m nuitka --windows-console-mode=disable --assume-yes-for-downloads --enable-plugin=pyside6 --standalone --onefile --output-dir=bin --output-filename=virt-stream-util.exe src/main.py
+        
+    # - name: Sign the executable
+    #   env:
+    #     CERTIFICATE_BASE64: ${{ secrets.CERTIFICATE_BASE64 }}
+    #     CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
+    #   run: |
+    #     # Decode certificate
+    #     echo $env:CERTIFICATE_BASE64 | Out-File -Encoding UTF8 cert.txt
+    #     certutil -decode cert.txt certificate.pfx
+    #     # Sign executable
+    #     signtool sign /f certificate.pfx /p $env:CERTIFICATE_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 bin/virt-stream-util.exe
+        
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: bin/virt-stream-util.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
