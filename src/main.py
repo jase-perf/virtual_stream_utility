@@ -282,12 +282,16 @@ class StreamSpecCreator(QMainWindow):
             folder_item.setText(0, folder_name)
             folder_item.setCheckState(0, Qt.Unchecked)
             folder_item.setData(0, Qt.UserRole, current_path)
-            folder_item.setFlags(folder_item.flags() | Qt.ItemFlag.ItemIsAutoTristate | Qt.ItemFlag.ItemIsUserCheckable)
+            # Remove ItemIsAutoTristate for root folders in lazy mode to make them checkable
+            if lazy and depth == 0:
+                folder_item.setFlags(folder_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            else:
+                folder_item.setFlags(folder_item.flags() | Qt.ItemFlag.ItemIsAutoTristate | Qt.ItemFlag.ItemIsUserCheckable)
             
             # Cache the item for quick lookups
             self.path_to_item[current_path] = folder_item
             
-            if lazy and depth == 0:
+            if lazy:
                 # For lazy loading, check if folder has any contents
                 # Check both for subfolders and files
                 has_subfolders = any(k for k in folder_contents.keys() if not k.startswith('_'))
@@ -299,8 +303,12 @@ class StreamSpecCreator(QMainWindow):
                     placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
                     placeholder.setData(0, Qt.UserRole, None)  # Mark as placeholder
             else:
-                # Build the next level
-                self._build_level(folder_item, folder_contents, current_path, lazy, depth + 1)
+                # Build ONLY the next level, not all levels
+                if depth == 0:  # Only build one more level when expanding
+                    self._build_level(folder_item, folder_contents, current_path, lazy=True, depth=depth + 1)
+                else:
+                    # Don't build deeper levels
+                    pass
         
         # Then add files
         if '_files' in level_dict and level_dict['_files']:
@@ -339,10 +347,13 @@ class StreamSpecCreator(QMainWindow):
             
             print(f"Found folder contents, building children...")
             
-            # Build children for this level
+            # Build ONLY one level of children
             self.tree.setUpdatesEnabled(False)
-            self._build_level(item, current_dict, path, lazy=False, depth=1)
+            self._build_level(item, current_dict, path, lazy=True, depth=0)
             self.tree.setUpdatesEnabled(True)
+            
+            # Now set the proper flags for the parent item (allow tri-state)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsAutoTristate)
             
             # Restore check states for any previously checked items
             self._restore_check_states(item)
@@ -375,23 +386,23 @@ class StreamSpecCreator(QMainWindow):
             
         check_state = item.checkState(0)
         
-        # Update our checked paths set
-        if check_state == Qt.Checked:
-            self.checked_paths.add(path)
-            # If it's a folder, add all its children
-            if item.childCount() > 0 or self._is_folder(path):
-                self._add_all_children_to_checked(path)
-        else:
-            self.checked_paths.discard(path)
-            # Remove all children from checked
-            self._remove_all_children_from_checked(path)
-        
         # Block signals to prevent recursive calls
         self.tree.blockSignals(True)
         
-        # Update children if this is a folder
-        if item.childCount() > 0 and check_state != Qt.PartiallyChecked:
-            self.update_children_check_state(item, check_state)
+        # Handle folder selection
+        if check_state == Qt.Checked:
+            # If this is a folder that hasn't been expanded yet
+            if item.childCount() == 1 and item.child(0).text(0) == self.tree.placeholder_text:
+                # User checked a folder without expanding it - that's fine!
+                # Don't need to update children since they're not loaded
+                pass
+            elif item.childCount() > 0:
+                # Update all loaded children
+                self.update_children_check_state(item, check_state)
+        elif check_state == Qt.Unchecked:
+            # Uncheck all children if they're loaded
+            if item.childCount() > 0 and not (item.childCount() == 1 and item.child(0).text(0) == self.tree.placeholder_text):
+                self.update_children_check_state(item, check_state)
         
         # Update parent check states
         self.update_parent_check_state(item.parent())
@@ -432,13 +443,6 @@ class StreamSpecCreator(QMainWindow):
             child = item.child(i)
             if child.text(0) != self.tree.placeholder_text:  # Skip placeholders
                 child.setCheckState(0, check_state)
-                # Update path in checked_paths set
-                child_path = child.data(0, Qt.UserRole)
-                if child_path:
-                    if check_state == Qt.Checked:
-                        self.checked_paths.add(child_path)
-                    else:
-                        self.checked_paths.discard(child_path)
                 
                 if child.childCount() > 0:
                     self.update_children_check_state(child, check_state)
@@ -476,11 +480,30 @@ class StreamSpecCreator(QMainWindow):
         
     def get_checked_paths(self):
         """Get all checked paths and optimize them"""
-        # Convert checked paths to the format needed
-        result_paths = []
+        checked_items = []
         
-        for path in self.checked_paths:
-            if self._is_folder(path):
+        def collect_checked(item):
+            if item.checkState(0) == Qt.Checked:
+                path = item.data(0, Qt.UserRole)
+                if path:  # Skip placeholders
+                    # Check if this is a folder (has children or could have children)
+                    is_folder = item.childCount() > 0 or self._is_folder(path)
+                    checked_items.append((path, is_folder))
+            elif item.checkState(0) == Qt.PartiallyChecked:
+                # For partially checked folders, check children
+                for i in range(item.childCount()):
+                    child = item.child(i)
+                    if child.text(0) != self.tree.placeholder_text:  # Skip placeholders
+                        collect_checked(child)
+                    
+        # Start from root items
+        for i in range(self.tree.topLevelItemCount()):
+            collect_checked(self.tree.topLevelItem(i))
+            
+        # Convert to path format
+        result_paths = []
+        for path, is_folder in checked_items:
+            if is_folder:
                 result_paths.append(f"{path}/...")
             else:
                 result_paths.append(path)
@@ -511,7 +534,7 @@ class StreamSpecCreator(QMainWindow):
         paths = self.get_checked_paths()
         
         if paths:
-            self.spec_lines = [f"share {path}" for path in paths]
+            self.spec_lines = [f'share "{path}"' if " " in path else f"share {path}" for path in paths]
             self.stream_spec = "\n".join(self.spec_lines)
         else:
             self.stream_spec = "# No paths selected"
@@ -524,6 +547,7 @@ class StreamSpecCreator(QMainWindow):
         """Update the stream based on selected items"""
         new_spec = self.stream_obj
         new_spec["Paths"] = self.spec_lines
+
         p4.save_stream(new_spec)
         self.close()
 
@@ -539,7 +563,7 @@ def main(stream):
     QApplication.processEvents()
     
     print(f"The stream is {stream}")
-    stream_obj = p4.run_stream("-o", f"{stream}")[0]
+    stream_obj = p4.fetch_stream(f"{stream}")
     if stream_obj["Type"] != "virtual":
         raise Exception(f"Stream {stream} is not a virtual stream")
     parent = stream_obj["Parent"]
