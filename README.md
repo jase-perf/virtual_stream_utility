@@ -6,6 +6,7 @@ A high-performance GUI tool for creating and editing Perforce (P4) virtual strea
 
 The Virtual Stream Spec Creator simplifies the process of defining which files and folders should be included in a Perforce virtual stream. It provides a visual tree interface where users can check/uncheck items to build their stream specification, with automatic optimization of paths and support for large repositories.
 
+
 ![demo](images/demo.gif)
 
 ## Usage
@@ -47,11 +48,11 @@ Download a precompiled executable from the [Releases page](https://github.com/ja
 
 This is a humble open-source project so the exe is not signed and you may need to tell Windows Defender or other antivirus software to trust it. Feel free to compile from source yourself or run it as python (see below) if you are concerned.
 
-1. In P4V, go to Tools > Manage Tools > Custom Tools...
+1. In P4V, go to Tools > Manage Tools > Custom Tools...  
 
     ![Setup custom tools in P4V](images/custom_tools.png)
 
-2. Create a new tool
+2. Create a new tool  
 
     ![New tool dialog](images/new_tool.png)
 
@@ -61,7 +62,7 @@ This is a humble open-source project so the exe is not signed and you may need t
     - Application \<Path to the executable you downloaded>
     - Arguments: `%t`
     - Start In: \<Directory where you want log file to be generated>
-    - Refresh P4V upon completion
+    - Refresh P4V upon completion  
     
     ![Tool settings](images/tool_settings.png)
 
