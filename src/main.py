@@ -1,8 +1,6 @@
 import sys
-from collections import defaultdict
 from functools import wraps
-from typing import Dict, List, Set, Tuple
-import time
+import logging
 
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QTreeWidget, QTreeWidgetItem, 
@@ -11,12 +9,29 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject
 from P4 import P4, P4Exception
 
+# Set up logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+# File handler with DEBUG level
+file_handler = logging.FileHandler('virtual_stream_utility.log')
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+# Console handler with INFO level
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
+
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+
+
 def show_error_dialog(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
         except Exception as e:
+            logger.error(str(e))
             QMessageBox.critical(None, "Error", str(e))
             raise
     return wrapper
@@ -35,6 +50,7 @@ class LoadingDialog(QDialog):
         layout = QVBoxLayout()
         
         self.label = QLabel("Loading stream files...")
+        logger.debug(self.label.text())
         self.label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.label)
         
@@ -55,7 +71,8 @@ class FileTreeBuilder(QObject):
     error = Signal(str)
     
     FILES_KEY = '__placeholder_files__'  # Use double underscore to minimize conflicts
-    
+    logger.debug(f"Files Key: {FILES_KEY}")
+
     def __init__(self, stream_files):
         super().__init__()
         self.stream_files = stream_files
@@ -64,6 +81,7 @@ class FileTreeBuilder(QObject):
         """Build tree structure as nested dictionaries"""
         try:
             self.progress.emit("Building file tree structure...")
+            logger.debug("Building file tree structure...")
             
             # Create tree structure
             tree = {}
@@ -72,6 +90,7 @@ class FileTreeBuilder(QObject):
             for idx, file_path in enumerate(self.stream_files):
                 if idx % 1000 == 0:
                     self.progress.emit(f"Processing file {idx}/{total_files}...")
+                    logger.debug(f"Processing file {idx}/{total_files}...")
                 
                 parts = file_path.split('/')
                 
@@ -97,6 +116,7 @@ class FileTreeBuilder(QObject):
                             current[part] = {}
                         current = current[part]
             
+            logger.debug("Finished building file tree structure.")
             self.finished.emit(tree)
             
         except Exception as e:
@@ -198,12 +218,14 @@ class StreamSpecCreator(QMainWindow):
     def on_build_error(self, error_msg):
         """Handle build errors"""
         self.progress_label.setText(f"Error: {error_msg}")
+        logger.error(f"Failed to build tree: {error_msg}")
         QMessageBox.critical(self, "Error", f"Failed to build tree: {error_msg}")
         
     def on_tree_structure_ready(self, tree_structure):
         """Tree structure is ready, now build the UI tree"""
         self.tree_structure = tree_structure
         self.progress_label.setText("Populating tree view...")
+        logger.debug("Populating tree view...")
         
         # Build only the top-level items
         self.tree.setUpdatesEnabled(False)
@@ -216,6 +238,7 @@ class StreamSpecCreator(QMainWindow):
     def build_tree_level(self, parent_item, level_dict, parent_path):
         """Build one level of the tree with lazy loading"""
         FILES_KEY = FileTreeBuilder.FILES_KEY
+        logger.debug(f"Building tree level under {parent_item.text(0)}: {level_dict}")
         
         # First add folders
         for folder_name, folder_contents in sorted(level_dict.items()):
@@ -406,7 +429,7 @@ class StreamSpecCreator(QMainWindow):
                         
             if not is_covered:
                 optimized.append(path)
-                
+        
         return optimized
         
     def update_stream_spec(self):
@@ -427,6 +450,7 @@ class StreamSpecCreator(QMainWindow):
         """Update the stream based on selected items"""
         new_spec = self.stream_obj
         new_spec["Paths"] = self.spec_lines
+        logger.debug(f"Running: p4.save_stream({new_spec})")
         p4.save_stream(new_spec)
         self.close()
 
@@ -441,12 +465,14 @@ def main(stream):
     loading.show()
     QApplication.processEvents()
     
-    print(f"The stream is {stream}")
+    logger.info(f"The selected stream is {stream}")
     stream_obj = p4.run_stream("-o", f"{stream}")[0]
     if stream_obj["Type"] != "virtual":
+        logger.error(f"Stream {stream} is not a virtual stream")
         raise Exception(f"Stream {stream} is not a virtual stream")
     parent = stream_obj["Parent"]
     
+    logger.debug(f"Loading files from {parent}...")
     loading.label.setText(f"Loading files from {parent}...")
     QApplication.processEvents()
     

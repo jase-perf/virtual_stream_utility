@@ -8,3 +8,4 @@ wheels/
 
 # Virtual environments
 .venv
+virtual_stream_utility.log
