@@ -72,6 +72,14 @@ class FileTreeBuilder(QObject):
                     self.progress.emit(f"Processing file {idx}/{total_files}...")
                 
                 parts = file_path.split('/')
+                
+                # Handle root-level files
+                if len(parts) == 1:
+                    if '_files' not in tree:
+                        tree['_files'] = []
+                    tree['_files'].append(parts[0])
+                    continue
+                
                 current = tree
                 
                 # Build nested structure
@@ -96,10 +104,11 @@ class FileTreeBuilder(QObject):
 class LazyTreeWidget(QTreeWidget):
     """Custom QTreeWidget that supports lazy loading"""
     
-    def __init__(self):
+    def __init__(self, parent=None):
         super().__init__()
         self.itemExpanded.connect(self.on_item_expanded)
         self.placeholder_text = "Loading..."
+        self.stream_spec_creator = None  # Will be set by parent
         
     def on_item_expanded(self, item):
         """Handle item expansion for lazy loading"""
@@ -107,9 +116,8 @@ class LazyTreeWidget(QTreeWidget):
         if item.childCount() == 1 and item.child(0).text(0) == self.placeholder_text:
             # Remove placeholder and load real children
             item.takeChild(0)
-            parent_widget = item.treeWidget().parent().parent().parent()  # Navigate to StreamSpecCreator
-            if hasattr(parent_widget, 'load_children'):
-                parent_widget.load_children(item)
+            if self.stream_spec_creator and hasattr(self.stream_spec_creator, 'load_children'):
+                self.stream_spec_creator.load_children(item)
 
 
 class StreamSpecCreator(QMainWindow):
@@ -153,6 +161,7 @@ class StreamSpecCreator(QMainWindow):
         self.tree = LazyTreeWidget()
         self.tree.setHeaderLabel("Files and Folders")
         self.tree.itemChanged.connect(self.on_item_changed)
+        self.tree.stream_spec_creator = self  # Set reference for lazy loading
         left_layout.addWidget(self.tree)
         
         # Progress label for tree building
@@ -220,6 +229,16 @@ class StreamSpecCreator(QMainWindow):
         self.tree_structure = tree_structure
         self.progress_label.setText("Populating tree view...")
         
+        # Debug output
+        print(f"Tree structure ready. Total files: {len(self.stream_files)}")
+        print(f"Top-level keys: {list(tree_structure.keys())[:10]}")
+        
+        # Check a specific folder's contents
+        if tree_structure:
+            first_folder = next((k for k in tree_structure.keys() if not k.startswith('_')), None)
+            if first_folder:
+                print(f"Contents of '{first_folder}': {list(tree_structure[first_folder].keys())[:5]}")
+        
         # Use QTimer to build tree incrementally to keep UI responsive
         if self.lazy_load_checkbox.isChecked():
             self.build_tree_lazy()
@@ -248,6 +267,10 @@ class StreamSpecCreator(QMainWindow):
         
     def _build_level(self, parent_item, level_dict, parent_path, lazy=True, depth=0):
         """Build one level of the tree"""
+        # Debug output
+        if depth == 0:
+            print(f"Building level at depth {depth}, parent_path: '{parent_path}', keys: {list(level_dict.keys())[:5]}")
+        
         # First add folders
         for folder_name, folder_contents in sorted(level_dict.items()):
             if folder_name.startswith('_'):
@@ -265,17 +288,22 @@ class StreamSpecCreator(QMainWindow):
             self.path_to_item[current_path] = folder_item
             
             if lazy and depth == 0:
-                # For lazy loading, just add a placeholder if the folder has contents
-                if folder_contents or (folder_contents.get('_files')):
+                # For lazy loading, check if folder has any contents
+                # Check both for subfolders and files
+                has_subfolders = any(k for k in folder_contents.keys() if not k.startswith('_'))
+                has_files = '_files' in folder_contents and len(folder_contents['_files']) > 0
+                
+                if has_subfolders or has_files:
                     placeholder = QTreeWidgetItem(folder_item)
                     placeholder.setText(0, self.tree.placeholder_text)
                     placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+                    placeholder.setData(0, Qt.UserRole, None)  # Mark as placeholder
             else:
                 # Build the next level
                 self._build_level(folder_item, folder_contents, current_path, lazy, depth + 1)
         
         # Then add files
-        if '_files' in level_dict:
+        if '_files' in level_dict and level_dict['_files']:
             for file_name in sorted(level_dict['_files']):
                 file_path = f"{parent_path}/{file_name}" if parent_path else file_name
                 
@@ -295,22 +323,34 @@ class StreamSpecCreator(QMainWindow):
     def load_children(self, item):
         """Load children for a specific item (lazy loading)"""
         path = item.data(0, Qt.UserRole)
+        print(f"Loading children for: {path}")
         
         # Navigate to the correct level in tree_structure
         parts = path.split('/')
         current_dict = self.tree_structure
         
-        for part in parts:
-            if part in current_dict:
-                current_dict = current_dict[part]
-            else:
-                return
-        
-        # Build children for this level
-        self._build_level(item, current_dict, path, lazy=False, depth=1)
-        
-        # Restore check states for any previously checked items
-        self._restore_check_states(item)
+        try:
+            for part in parts:
+                if part in current_dict:
+                    current_dict = current_dict[part]
+                else:
+                    print(f"Part '{part}' not found in tree structure")
+                    return
+            
+            print(f"Found folder contents, building children...")
+            
+            # Build children for this level
+            self.tree.setUpdatesEnabled(False)
+            self._build_level(item, current_dict, path, lazy=False, depth=1)
+            self.tree.setUpdatesEnabled(True)
+            
+            # Restore check states for any previously checked items
+            self._restore_check_states(item)
+            
+        except Exception as e:
+            print(f"Error loading children: {e}")
+            import traceback
+            traceback.print_exc()
         
     def _restore_check_states(self, item):
         """Restore check states for items based on checked_paths"""
@@ -330,6 +370,9 @@ class StreamSpecCreator(QMainWindow):
             return
             
         path = item.data(0, Qt.UserRole)
+        if path is None:
+            return  # Skip items without paths (like placeholders)
+            
         check_state = item.checkState(0)
         
         # Update our checked paths set
@@ -361,12 +404,16 @@ class StreamSpecCreator(QMainWindow):
         
     def _is_folder(self, path):
         """Check if a path represents a folder"""
+        if path is None:
+            return False
         # A path is a folder if any file in our file_set starts with path/
         prefix = path + '/'
         return any(f.startswith(prefix) for f in self.file_set)
         
     def _add_all_children_to_checked(self, folder_path):
         """Add all children of a folder to checked paths"""
+        if folder_path is None:
+            return
         prefix = folder_path + '/'
         for file_path in self.file_set:
             if file_path.startswith(prefix):
@@ -374,6 +421,8 @@ class StreamSpecCreator(QMainWindow):
                 
     def _remove_all_children_from_checked(self, folder_path):
         """Remove all children of a folder from checked paths"""
+        if folder_path is None:
+            return
         prefix = folder_path + '/'
         self.checked_paths = {p for p in self.checked_paths if not p.startswith(prefix)}
         
@@ -383,6 +432,14 @@ class StreamSpecCreator(QMainWindow):
             child = item.child(i)
             if child.text(0) != self.tree.placeholder_text:  # Skip placeholders
                 child.setCheckState(0, check_state)
+                # Update path in checked_paths set
+                child_path = child.data(0, Qt.UserRole)
+                if child_path:
+                    if check_state == Qt.Checked:
+                        self.checked_paths.add(child_path)
+                    else:
+                        self.checked_paths.discard(child_path)
+                
                 if child.childCount() > 0:
                     self.update_children_check_state(child, check_state)
             
