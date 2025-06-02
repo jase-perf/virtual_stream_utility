@@ -54,7 +54,7 @@ class FileTreeBuilder(QObject):
     finished = Signal(dict)
     error = Signal(str)
     
-    FILES_KEY = '__files__'  # Use double underscore to minimize conflicts
+    FILES_KEY = '__placeholder_files__'  # Use double underscore to minimize conflicts
     
     def __init__(self, stream_files):
         super().__init__()
