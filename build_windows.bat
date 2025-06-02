@@ -1,2 +1,2 @@
-uv run python -m nuitka --windows-console-mode=disable --assume-yes-for-downloads --enable-plugin=pyside6 --standalone --onefile --output-dir=bin --output-filename=virt-stream-util.exe src/main.py
+uv run python -m nuitka --windows-console-mode=disable --assume-yes-for-downloads --enable-plugin=pyside6 --standalone --onefile --onefile-no-compression --output-dir=bin --output-filename=virt-stream-util.exe src/main.py
 @REM uv run pyinstaller --onefile --windowed --distpath .\bin -n "virt-stream-util.exe" .\src\main.py

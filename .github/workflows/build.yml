@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*' # Trigger on version tags
 
+permissions:
+  contents: write  # Add this permissions block 
+
 jobs:
   build:
     runs-on: windows-latest
@@ -28,8 +31,8 @@ jobs:
         
     - name: Build with Nuitka
       run: |
-        uv run python -m nuitka --windows-console-mode=disable --assume-yes-for-downloads --enable-plugin=pyside6 --standalone --onefile --output-dir=bin --output-filename=virt-stream-util.exe src/main.py
-        
+        uv run python -m nuitka --windows-console-mode=disable --assume-yes-for-downloads --enable-plugin=pyside6 --standalone --onefile --onefile-no-compression --output-dir=bin --output-filename=virt-stream-util.exe src/main.py
+
     # - name: Sign the executable
     #   env:
     #     CERTIFICATE_BASE64: ${{ secrets.CERTIFICATE_BASE64 }}
