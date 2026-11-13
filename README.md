@@ -1,5 +1,8 @@
 # Virtual Stream Spec Creator
 
+> [!IMPORTANT]
+> **This tool now lives in the [Ultimate P4V Toolkit](https://jase.town/ultimate-p4v-toolkit/).** It's called Virtual Stream Utility there: a right-click tool in P4V that runs inside P4V itself, so there's no executable to download or unblock. Go to that page for setup steps and the rest of the toolkit.
+
 A high-performance GUI tool for creating and editing Perforce (P4) virtual stream specifications with an intuitive file tree interface.
 
 ## Overview
